@@ -28,8 +28,10 @@ from alerts.telegram import (
     send_checklist_alert,
     send_final_warning,
     send_entry_window_alert,
+    send_trade_plan_alert,
 )
 from alerts.checklist import generate_pre_event_checklist, checklist_to_text
+from engine.trade_plan import generate_trade_plan
 
 LOOP_INTERVAL_SECONDS = 30  # How often the main loop checks for due alerts (only used by run_main_loop)
 
@@ -99,6 +101,29 @@ def check_and_send_alerts():
                 first_asset = (event["affected_assets"] or "EURUSD").split(",")[0]
                 send_entry_window_alert(first_asset)
                 mark_alert_sent(key)
+
+        # THE CORE ALERT: the moment the actual number is known (any time
+        # after release, no window restriction needed since actual_value
+        # only populates once ForexFactory publishes it), generate and
+        # send a full trade plan for every asset this event affects.
+        if event["actual_value"] is not None and event["forecast_value"] is not None:
+            assets = (event["affected_assets"] or "").split(",")
+            for asset in assets:
+                asset = asset.strip()
+                if not asset:
+                    continue
+                key = f"{event['event_name']}|{event_key_base}|tradeplan|{asset}"
+                if not has_alert_been_sent(key):
+                    try:
+                        plan = generate_trade_plan(
+                            event["event_name"], asset,
+                            actual=event["actual_value"],
+                            forecast=event["forecast_value"],
+                        )
+                        send_trade_plan_alert(plan)
+                    except Exception as e:
+                        print(f"Trade plan generation failed for {asset}: {e}")
+                    mark_alert_sent(key)
 
 
 def run_main_loop():
