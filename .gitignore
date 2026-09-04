@@ -1,5 +1,4 @@
 __pycache__/
 *.pyc
-data/newsedge.db
 .env
 *.log
