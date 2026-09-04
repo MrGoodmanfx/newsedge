@@ -1,0 +1,36 @@
+name: NewsEdge Alert Check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run NewsEdge alert check
+        env:
+          NEWSEDGE_TELEGRAM_TOKEN: ${{ secrets.NEWSEDGE_TELEGRAM_TOKEN }}
+          NEWSEDGE_TELEGRAM_CHAT_ID: ${{ secrets.NEWSEDGE_TELEGRAM_CHAT_ID }}
+        run: python run_once.py
+
+      - name: Commit updated database (alert history + calendar cache)
+        run: |
+          git config --local user.email "newsedge-bot@users.noreply.github.com"
+          git config --local user.name "NewsEdge Bot"
+          git add data/newsedge.db
+          git diff --staged --quiet || git commit -m "Update NewsEdge database [automated]"
+          git push
