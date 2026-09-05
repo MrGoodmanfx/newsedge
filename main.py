@@ -22,6 +22,7 @@ import pytz
 from config import CALENDAR_REFRESH_MINUTES
 from data.database import init_db, get_upcoming_events, has_alert_been_sent, mark_alert_sent
 from data.calendar import refresh_calendar
+from data.prices import get_latest_price, get_reaction_prices
 from utils.timezone import utc_to_eat, eat_now
 from alerts.telegram import (
     send_preparation_alert,
@@ -29,6 +30,7 @@ from alerts.telegram import (
     send_final_warning,
     send_entry_window_alert,
     send_trade_plan_alert,
+    send_telegram_message,
 )
 from alerts.checklist import generate_pre_event_checklist, checklist_to_text
 from engine.trade_plan import generate_trade_plan
@@ -124,6 +126,32 @@ def check_and_send_alerts():
                     except Exception as e:
                         print(f"Trade plan generation failed for {asset}: {e}")
                     mark_alert_sent(key)
+                            # PRICE-MOVE FALLBACK: ForexFactory's free feed doesn't reliably
+        # publish "actual" values, so we can't always auto-build a full
+        # trade plan. As a fallback, once the event has passed, check if
+        # price actually moved significantly - if so, alert the trader to
+        # check the number and use the dashboard to build a plan manually.
+        if event["actual_value"] is None and -1200 <= seconds_until <= -600:
+            key = f"{event['event_name']}|{event_key_base}|pricemove_fallback"
+            if not has_alert_been_sent(key):
+                first_asset = (event["affected_assets"] or "EURUSD").split(",")[0].strip()
+                try:
+                    reaction = get_reaction_prices(first_asset, event_dt_utc)
+                    price_at_event = reaction.get("price_at_event")
+                    price_15min = reaction.get("price_15min")
+                    if price_at_event and price_15min:
+                        pct_move = abs((price_15min - price_at_event) / price_at_event) * 100
+                        if pct_move >= 0.10:
+                            send_telegram_message(
+                                f"*NewsEdge - Price Move Detected*\n"
+                                f"{event['event_name']} released - {first_asset} moved "
+                                f"{pct_move:.2f}% in 15 min.\n"
+                                f"Check the actual number and open the dashboard to "
+                                f"generate your trade plan:\n`streamlit run dashboard/app.py`"
+                            )
+                except Exception as e:
+                    print(f"Price-move fallback check failed: {e}")
+                mark_alert_sent(key)
 
 
 def run_main_loop():
